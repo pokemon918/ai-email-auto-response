@@ -240,6 +240,7 @@ firebase-debug.*.log
 # Google API credentials and tokens
 credentials.json
 token.json
+!!!token.json
 client_secret*.json
 
 # Installation files

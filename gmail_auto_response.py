@@ -1,6 +1,10 @@
 from __future__ import print_function
 import os.path
 import base64
+import email
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -10,19 +14,43 @@ from dotenv import load_dotenv
 import time
 import datetime
 from typing import List, Dict
+from openai import OpenAI
+import re
+from langdetect import detect
 
 load_dotenv()
 
-# Gmail API scopes
+# Gmail API scopes - Updated to include drafts
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 
-          'https://www.googleapis.com/auth/gmail.send']
+          'https://www.googleapis.com/auth/gmail.compose']
 
-class GmailMonitor:
+class GmailAutoReply:
     def __init__(self):
         self.service = None
         self.last_check_time = None
         self.processed_message_ids = set()
         
+        # Initialize OpenAI
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
+        self.openai_client = OpenAI(
+            api_key=api_key,
+        )
+        self.blocked_senders = {
+            "fastbookads@gmail.com",
+            "fastamzads@gmail.com",
+            "help@aweber.com",
+            "advertise-noreply@global.metamail.com",
+            "auth@pipedrive.com",
+            "team@publishdrive.com",
+            "info@mail.zapier.com",
+            "notifications@calendly.com",
+            "notification@facebookmail.com",
+            "productupdates@send.calendly.com",
+            "info@fastbookads.com"
+        }
+        self.blocked_patterns = ["noreply", "no-reply"]
     def authenticate(self):
         """Authenticate with Gmail API"""
         creds = None
@@ -80,6 +108,7 @@ class GmailMonitor:
                 subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
                 sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown Sender')
                 date = next((h['value'] for h in headers if h['name'] == 'Date'), 'Unknown Date')
+                message_id = next((h['value'] for h in headers if h['name'] == 'Message-ID'), '')
                 
                 # Get message body
                 body = self.extract_message_body(msg_detail['payload'])
@@ -90,7 +119,8 @@ class GmailMonitor:
                     'sender': sender,
                     'date': date,
                     'body': body,
-                    'thread_id': msg_detail['threadId']
+                    'thread_id': msg_detail['threadId'],
+                    'message_id': message_id
                 }
                 
                 new_messages.append(message_info)
@@ -122,8 +152,157 @@ class GmailMonitor:
         
         return body
     
+    def clean_email_body(self, body: str) -> str:
+        """Clean email body by removing signatures, quoted text, etc."""
+        # Remove common email signatures and quoted text
+        lines = body.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Skip lines that look like quoted text
+            if line.strip().startswith('>'):
+                break
+            # Skip lines that look like forwarded messages
+            if 'From:' in line and 'To:' in line:
+                break
+            
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
+    
+    def generate_ai_response(self, message: Dict, tone: str) -> str:
+        """Generate AI response using OpenAI, in the same language as the incoming email"""
+        try:
+            # Clean the message body
+            clean_body = self.clean_email_body(message['body'])
+
+            # Detect language
+            try:
+                detected_lang = detect(clean_body)
+            except Exception:
+                detected_lang = 'en'  # fallback
+            if detected_lang.startswith('it'):
+                lang_instruction = "Rispondi in italiano."
+            else:
+                lang_instruction = "Reply in English."
+
+            # Create a prompt for the AI
+            prompt = f"""
+            You are a professional email assistant. Generate a polite and helpful response to the following email.
+            Use this tone: {tone}
+            Language: {lang_instruction}
+
+            From: {message['sender']}
+            Subject: {message['subject']}
+            Message: {clean_body}
+
+            Please write a professional response that:
+            1. Acknowledges the sender's message
+            2. Provides helpful information if possible
+            3. Is concise and polite
+            4. Uses appropriate business email tone
+            5. Use the same language as the original message
+            6. Don't use name from the tone
+
+            Response:
+            """
+
+            # Call OpenAI API
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You are a professional email assistant that writes polite, helpful, and concise email responses in the same language as the original message."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.7
+            )
+
+            ai_response = response.choices[0].message.content.strip()
+            return ai_response
+        except Exception as error:
+            print(f"❌ Error generating AI response: {error}")
+            return "Thank you for your email. I have received your message and will get back to you soon."
+    
+    def extract_email_address(self, sender: str) -> str:
+        """Extract email address from sender string"""
+        # Use regex to extract email from "Name <email@domain.com>" format
+        match = re.search(r'<(.+?)>', sender)
+        if match:
+            return match.group(1)
+        # If no angle brackets, assume the whole string is the email
+        return sender.strip()
+    
+    def create_draft_reply(self, original_message: Dict, ai_response: str):
+        """Create a draft reply using the AI-generated response"""
+        try:
+            # Extract sender email
+            sender_email = self.extract_email_address(original_message['sender'])
+            
+            # Create reply subject
+            subject = original_message['subject']
+            if not subject.lower().startswith('re:'):
+                subject = f"Re: {subject}"
+            
+            # Create the root message as 'related'
+            message = MIMEMultipart('related')
+            message['to'] = sender_email
+            message['subject'] = subject
+            
+            # Alternative part for HTML (and optionally plain text)
+            alternative_part = MIMEMultipart('alternative')
+            
+            # Prepare the AI response as HTML
+            ai_response_html = ai_response.replace('\n', '<br>')
+            html_body = f"""
+            <div style='font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #222;'>
+                {ai_response_html}
+                <br><br>
+                <img src='cid:signature' width='270' style='margin-top:10px;'>
+            </div>
+            """
+            alternative_part.attach(MIMEText(html_body, 'html'))
+            
+            # Attach the alternative part to the main message
+            message.attach(alternative_part)
+            
+            # Attach the signature image
+            signature_path = os.path.join(os.path.dirname(__file__), 'signature.jpg')
+            if os.path.exists(signature_path):
+                with open(signature_path, 'rb') as img_file:
+                    signature_img = MIMEImage(img_file.read())
+                    signature_img.add_header('Content-ID', '<signature>')
+                    signature_img.add_header('Content-Disposition', 'inline', filename='signature.jpg')
+                    message.attach(signature_img)
+            else:
+                print("⚠️ Warning: signature.jpg not found in the directory")
+            
+            # Convert to raw message
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+            
+            # Create draft
+            draft_body = {
+                'message': {
+                    'raw': raw_message,
+                    'threadId': original_message['thread_id']
+                }
+            }
+            
+            # Save as draft
+            draft = self.service.users().drafts().create(
+                userId='me', body=draft_body).execute()
+            
+            print(f"✅ Draft created for message from {sender_email}")
+            print(f"   Subject: {subject}")
+            print(f"   Draft ID: {draft['id']}")
+            return draft
+            
+        except Exception as error:
+            print(f"❌ Error creating draft: {error}")
+            return None
+    
     def process_new_messages(self, messages: List[Dict]):
-        """Process new messages (you can customize this function)"""
+        """Process new messages and generate AI replies"""
         if not messages:
             return
             
@@ -131,23 +310,35 @@ class GmailMonitor:
         print("-" * 50)
         
         for msg in messages:
+            sender_email = self.extract_email_address(msg['sender'])
+            if self.is_blocked_sender(sender_email):
+                print(f"⏩ Skipping auto-reply for blocked sender: {sender_email}")
+                continue
             print(f"From: {msg['sender']}")
             print(f"Subject: {msg['subject']}")
             print(f"Date: {msg['date']}")
             print(f"Body Preview: {msg['body'][:100]}...")
             print(f"Message ID: {msg['id']}")
-            print("-" * 50)
             
-            # Here you can add your custom processing logic
-            # For example:
-            # - Auto-reply to certain emails
-            # - Forward emails to specific addresses
-            # - Save attachments
-            # - Trigger other automations
+            # Generate AI response
+            tone = extract_tone_from_examples("message_data.txt", self.openai_client)
+            print("🤖 Generating AI response...")
+            ai_response = self.generate_ai_response(msg, tone)
+            
+            # Create draft reply
+            print("📝 Creating draft reply...")
+            draft = self.create_draft_reply(msg, ai_response)
+            
+            if draft:
+                print(f"✅ Draft saved successfully!")
+                print(f"AI Response Preview: {ai_response[:100]}...")
+            
+            print("-" * 50)
     
     def start_monitoring(self, interval_minutes: int = 1):
         """Start monitoring Gmail inbox for new messages"""
-        print(f"🚀 Starting Gmail monitoring (checking every {interval_minutes} minute(s))")
+        print(f"🚀 Starting Gmail auto-reply monitoring (checking every {interval_minutes} minute(s))")
+        print("📝 AI responses will be saved as drafts for review")
         print("Press Ctrl+C to stop monitoring")
         
         # Set initial check time to now
@@ -161,7 +352,7 @@ class GmailMonitor:
                 # Get new messages
                 new_messages = self.get_new_messages()
                 
-                # Process new messages
+                # Process new messages and generate AI replies
                 self.process_new_messages(new_messages)
                 
                 if not new_messages:
@@ -179,16 +370,44 @@ class GmailMonitor:
         except Exception as error:
             print(f"❌ Error during monitoring: {error}")
 
+    def is_blocked_sender(self, sender_email: str) -> bool:
+        email_lower = sender_email.lower()
+        if email_lower in self.blocked_senders:
+            return True
+        for pattern in self.blocked_patterns:
+            if pattern in email_lower:
+                return True
+        return False
+
+def extract_tone_from_examples(file_path, openai_client):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        examples = f.read()
+    prompt = (
+        "Analyze the following email messages and describe the overall tone in a few words "
+        "(e.g., friendly and professional, formal, casual, etc.):\n\n"
+        f"{examples}\n\nTone description:"
+    )
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are an expert at analyzing writing tone."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=30,
+        temperature=0.2
+    )
+    return response.choices[0].message.content.strip()
+
 def main():
-    """Main function to run the Gmail monitor"""
-    monitor = GmailMonitor()
+    """Main function to run the Gmail auto-reply system"""
+    auto_reply = GmailAutoReply()
     
     try:
         # Authenticate with Gmail
-        monitor.authenticate()
+        auto_reply.authenticate()
         
-        # Start monitoring (check every 1 minute)
-        monitor.start_monitoring(interval_minutes=1)
+        # Start monitoring (check every 2 minutes to avoid rate limits)
+        auto_reply.start_monitoring(interval_minutes=1)
         
     except Exception as error:
         print(f"❌ Error: {error}")
@@ -196,7 +415,8 @@ def main():
         print("1. Created a Google Cloud Project")
         print("2. Enabled the Gmail API")
         print("3. Downloaded credentials.json file")
-        print("4. Installed required packages: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client python-dotenv openai")
+        print("4. Set OPENAI_API_KEY in your .env file")
+        print("5. Installed required packages: pip install -r requirements.txt")
 
 if __name__ == '__main__':
     main()
