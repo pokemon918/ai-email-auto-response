@@ -17,6 +17,7 @@ from typing import List, Dict
 from openai import OpenAI
 import re
 from langdetect import detect
+import httpx
 
 load_dotenv()
 
@@ -34,8 +35,14 @@ class GmailAutoReply:
         api_key = os.getenv('OPENAI_API_KEY')
         if not api_key:
             raise ValueError("OPENAI_API_KEY not found in environment variables")
+        
+        # Create OpenAI client with explicit configuration
         self.openai_client = OpenAI(
             api_key=api_key,
+            http_client=httpx.Client(
+                timeout=httpx.Timeout(30.0),
+                verify=True
+            )
         )
         self.blocked_senders = {
             "fastbookads@gmail.com",
@@ -55,8 +62,8 @@ class GmailAutoReply:
         """Authenticate with Gmail API"""
         creds = None
         # The file token.json stores the user's access and refresh tokens.
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        if os.path.exists('!!!token.json'):
+            creds = Credentials.from_authorized_user_file('!!!token.json', SCOPES)
         
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
