@@ -62,8 +62,8 @@ class GmailAutoReply:
         """Authenticate with Gmail API"""
         creds = None
         # The file token.json stores the user's access and refresh tokens.
-        if os.path.exists('!!!token.json'):
-            creds = Credentials.from_authorized_user_file('!!!token.json', SCOPES)
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
@@ -210,7 +210,9 @@ class GmailAutoReply:
             4. Uses appropriate business email tone
             5. Use the same language as the original message
             6. Don't use name from the tone
-
+            7. Don't write name or [Your Name] at the end of the message and write like this.
+            8.The prompt needs to be adjusted so that, not only is the information analyzed to provide the answers, but the same super professional but not servile writing style is maintained
+                for example, not use "Thank you for your email" or "Thanks for reaching out".
             Response:
             """
 
@@ -247,14 +249,14 @@ class GmailAutoReply:
             sender_email = self.extract_email_address(original_message['sender'])
             
             # Create reply subject
-            subject = original_message['subject']
-            if not subject.lower().startswith('re:'):
-                subject = f"Re: {subject}"
+            # subject = original_message['subject']
+            # if not subject.lower().startswith('re:'):
+            #     subject = f"Re: {subject}"
             
             # Create the root message as 'related'
             message = MIMEMultipart('related')
             message['to'] = sender_email
-            message['subject'] = subject
+            # message['subject'] = subject
             
             # Alternative part for HTML (and optionally plain text)
             alternative_part = MIMEMultipart('alternative')
@@ -262,10 +264,17 @@ class GmailAutoReply:
             # Prepare the AI response as HTML
             ai_response_html = ai_response.replace('\n', '<br>')
             html_body = f"""
-            <div style='font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #222;'>
+            <div style='font-family: Arial; font-size: 14px; color: #222;'>
                 {ai_response_html}
                 <br><br>
-                <img src='cid:signature' width='270' style='margin-top:10px;'>
+                <div style='font-size: 15px; font-family: Arial;'>   
+                    Noemi
+                </div>
+                <div style='font-size: 15px; font-style: italic; font-family: Arial;'>
+                    Customer Success Assistant<br>
+                    fastbookads.com
+                </div>
+                <img src='cid:signature' width='150' style='margin-top:5px;'>
             </div>
             """
             alternative_part.attach(MIMEText(html_body, 'html'))
@@ -300,7 +309,7 @@ class GmailAutoReply:
                 userId='me', body=draft_body).execute()
             
             print(f"✅ Draft created for message from {sender_email}")
-            print(f"   Subject: {subject}")
+            # print(f"   Subject: {subject}")
             print(f"   Draft ID: {draft['id']}")
             return draft
             
