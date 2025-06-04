@@ -211,11 +211,13 @@ class GmailAutoReply:
             5. Use the same language as the original message
             6. Don't use name from the tone
             7. Don't write name or [Your Name] at the end of the message and write like this.
-            8. We don't say "Hi" to the user at the beginning of the email.
+            8. After every period, insert a newline (line break).
+            9. Don't use "thank you", "I appreciate your email", "I appreciate your message", "I appreciate your reaching out", "I appreciate your contacting us" expression or similar expressions of gratitude except for the end of the email.
+               Only use Hi,or Hello for greeting.
             Response:
             """
 
-            # Call OpenAI API
+            # Call OpenAI API   
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
@@ -378,7 +380,7 @@ class GmailAutoReply:
                 
                 # Wait for the specified interval
                 print(f"⏰ Waiting {interval_minutes} minute(s) until next check...")
-                time.sleep(interval_minutes * 10)
+                time.sleep(interval_minutes * 60)
                 
         except KeyboardInterrupt:
             print("\n🛑 Monitoring stopped by user")
