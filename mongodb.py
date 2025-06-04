@@ -82,7 +82,7 @@ class GmailMongoDB:
             'body': body,
             'snippet': message.get('snippet', ''),
             'labels': message.get('labelIds', []),
-            'stored_at': datetime.utcnow()
+            'stored_at': datetime.now()
         }
 
     def get_thread_messages(self, thread_id):

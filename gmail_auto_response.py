@@ -211,8 +211,7 @@ class GmailAutoReply:
             5. Use the same language as the original message
             6. Don't use name from the tone
             7. Don't write name or [Your Name] at the end of the message and write like this.
-            8.The prompt needs to be adjusted so that, not only is the information analyzed to provide the answers, but the same super professional but not servile writing style is maintained
-                for example, not use "Thank you for your email" or "Thanks for reaching out".
+            8. We don't say "Hi" to the user at the beginning of the email.
             Response:
             """
 
@@ -267,14 +266,14 @@ class GmailAutoReply:
             <div style='font-family: Arial; font-size: 14px; color: #222;'>
                 {ai_response_html}
                 <br><br>
-                <div style='font-size: 15px; font-family: Arial;'>   
+                <div style='font-size: 14px; font-family: Arial; color: #222;'>   
                     Noemi
                 </div>
-                <div style='font-size: 15px; font-style: italic; font-family: Arial;'>
+                <div style='font-size: 14px; font-style: italic; font-family: Arial; color: #222;'>
                     Customer Success Assistant<br>
                     fastbookads.com
                 </div>
-                <img src='cid:signature' width='150' style='margin-top:5px;'>
+                <img src='cid:signature' width='120px' style='margin-top:5px;'>
             </div>
             """
             alternative_part.attach(MIMEText(html_body, 'html'))
@@ -379,7 +378,7 @@ class GmailAutoReply:
                 
                 # Wait for the specified interval
                 print(f"⏰ Waiting {interval_minutes} minute(s) until next check...")
-                time.sleep(interval_minutes * 60)
+                time.sleep(interval_minutes * 10)
                 
         except KeyboardInterrupt:
             print("\n🛑 Monitoring stopped by user")
@@ -399,8 +398,16 @@ def extract_tone_from_examples(file_path, openai_client):
     with open(file_path, 'r', encoding='utf-8') as f:
         examples = f.read()
     prompt = (
-        "Analyze the following email messages and describe the overall tone in a few words "
-        "(e.g., friendly and professional, formal, casual, etc.):\n\n"
+       """Analyze the writing style and tone of the person who is writing from the "fastbookads@gmail.com" email address in the provided email chat history. Pay attention to:
+        1. Level of formality
+        2. Greeting and closing styles
+        3. Sentence structure and length
+        4. Use of punctuation and formatting
+        5. Vocabulary choices and any recurring phrases
+        6. Level of directness/indirectness
+        7. Use of questions vs. statements
+        8. Emotional tone (friendly, professional, casual, etc.)
+        9. Any distinctive writing patterns or quirks"""
         f"{examples}\n\nTone description:"
     )
     response = openai_client.chat.completions.create(
