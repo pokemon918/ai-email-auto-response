@@ -62,8 +62,8 @@ class GmailAutoReply:
         """Authenticate with Gmail API"""
         creds = None
         # The file token.json stores the user's access and refresh tokens.
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        if os.path.exists('token_client.json'):
+            creds = Credentials.from_authorized_user_file('token_client.json', SCOPES)
         
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
@@ -140,24 +140,30 @@ class GmailAutoReply:
             return []
     
     def extract_message_body(self, payload):
-        """Extract the body text from message payload"""
-        body = ""
+        """Recursively extract the body text from message payload."""
+        def get_text_from_parts(parts):
+            for part in parts:
+                if part.get('mimeType') == 'text/plain' and 'data' in part.get('body', {}):
+                    return base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='replace')
+                elif part.get('mimeType', '').startswith('multipart/'):
+                    # Recursively search in subparts
+                    result = get_text_from_parts(part.get('parts', []))
+                    if result:
+                        return result
+            # Fallback: try to get text/html if no text/plain found
+            for part in parts:
+                if part.get('mimeType') == 'text/html' and 'data' in part.get('body', {}):
+                    return base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='replace')
+            return ""
         
         if 'parts' in payload:
-            for part in payload['parts']:
-                if part['mimeType'] == 'text/plain':
-                    if 'data' in part['body']:
-                        body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
-                        break
-                elif part['mimeType'] == 'text/html' and not body:
-                    if 'data' in part['body']:
-                        body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
+            return get_text_from_parts(payload['parts'])
         else:
-            if payload['mimeType'] == 'text/plain':
-                if 'data' in payload['body']:
-                    body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
-        
-        return body
+            if payload.get('mimeType') == 'text/plain' and 'data' in payload.get('body', {}):
+                return base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='replace')
+            elif payload.get('mimeType') == 'text/html' and 'data' in payload.get('body', {}):
+                return base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='replace')
+        return ""
     
     def clean_email_body(self, body: str) -> str:
         """Clean email body by removing signatures, quoted text, etc."""
@@ -180,28 +186,30 @@ class GmailAutoReply:
     def generate_ai_response(self, message: Dict, tone: str) -> str:
         """Generate AI response using OpenAI, in the same language as the incoming email"""
         try:
-            # Clean the message body
-            clean_body = self.clean_email_body(message['body'])
-
-            # Detect language
+            # Get the full conversation history
+            conversation_history = self.get_thread_history(message['thread_id'])
+            print(conversation_history)
+            # Detect language from the latest message or the whole thread
             try:
-                detected_lang = detect(clean_body)
+                detected_lang = detect(conversation_history+message['body'])
             except Exception:
                 detected_lang = 'en'  # fallback
             if detected_lang.startswith('it'):
                 lang_instruction = "Rispondi in italiano."
             else:
                 lang_instruction = "Reply in English."
+            
+            with open('message_data.txt', 'r', encoding='utf-8') as f:
+                examples = f.read()
 
             # Create a prompt for the AI
             prompt = f"""
-            You are a professional email assistant. Generate a polite and helpful response to the following email.
+            You are a professional email assistant. Generate a polite and helpful response to the following email conversation.
             Use this tone: {tone}
             Language: {lang_instruction}
 
-            From: {message['sender']}
-            Subject: {message['subject']}
-            Message: {clean_body}
+            Conversation history:
+            {conversation_history}
 
             Please write a professional response that:
             1. Acknowledges the sender's message
@@ -213,7 +221,9 @@ class GmailAutoReply:
             7. Don't write name or [Your Name] at the end of the message and write like this.
             8. After every period, insert a newline (line break).
             9. Don't use "thank you", "I appreciate your email", "I appreciate your message", "I appreciate your reaching out", "I appreciate your contacting us" expression or similar expressions of gratitude except for the end of the email.
-               Only use Hi,or Hello for greeting.
+               Only use Hi,or Hello or Ciao for greeting.
+            10. Consider conversation history to generate the response.
+            11. Use correct language for the response include greeting and closing.
             Response:
             """
 
@@ -275,7 +285,7 @@ class GmailAutoReply:
                     Customer Success Assistant<br>
                     fastbookads.com
                 </div>
-                <img src='cid:signature' width='120px' style='margin-top:5px;'>
+                <img src='cid:signature' style='max-width:120px; width:100%; height:auto; margin-top:5px; display:block;'>
             </div>
             """
             alternative_part.attach(MIMEText(html_body, 'html'))
@@ -331,11 +341,11 @@ class GmailAutoReply:
             if self.is_blocked_sender(sender_email):
                 print(f"⏩ Skipping auto-reply for blocked sender: {sender_email}")
                 continue
-            print(f"From: {msg['sender']}")
-            print(f"Subject: {msg['subject']}")
-            print(f"Date: {msg['date']}")
-            print(f"Body Preview: {msg['body'][:100]}...")
-            print(f"Message ID: {msg['id']}")
+            # print(f"From: {msg['sender']}")
+            # print(f"Subject: {msg['subject']}")
+            # print(f"Date: {msg['date']}")
+            # print(f"Body Preview: {msg['body'][:100]}...")
+            # print(f"Message ID: {msg['id']}")
             
             # Generate AI response
             tone = extract_tone_from_examples("message_data.txt", self.openai_client)
@@ -395,6 +405,28 @@ class GmailAutoReply:
             if pattern in email_lower:
                 return True
         return False
+
+    def get_thread_history(self, thread_id):
+        """Fetch all messages in a thread and build a conversation history string."""
+        try:
+            thread = self.service.users().threads().get(userId='me', id=thread_id, format='full').execute()
+            messages = thread.get('messages', [])
+            history = []
+            print(len(messages))
+            for msg in messages:
+                headers = msg['payload'].get('headers', [])
+                sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown Sender')
+                date = next((h['value'] for h in headers if h['name'] == 'Date'), 'Unknown Date')
+                subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+                body = self.extract_message_body(msg['payload'])
+                # Optionally clean the body
+                print("Body----------- "+body)
+                clean_body = self.clean_email_body(body)
+                history.append(f"From: {sender}\nDate: {date}\nSubject: {subject}\nMessage:\n{clean_body}\n")
+            return "\n---\n".join(history)
+        except Exception as error:
+            print(f"❌ Error fetching thread history: {error}")
+            return ""
 
 def extract_tone_from_examples(file_path, openai_client):
     with open(file_path, 'r', encoding='utf-8') as f:
