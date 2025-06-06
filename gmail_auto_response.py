@@ -55,7 +55,8 @@ class GmailAutoReply:
             "notifications@calendly.com",
             "notification@facebookmail.com",
             "productupdates@send.calendly.com",
-            "info@fastbookads.com"
+            "info@fastbookads.com",
+            "update@global.metamail.com"
         }
         self.blocked_patterns = ["noreply", "no-reply"]
     def authenticate(self):
@@ -74,7 +75,7 @@ class GmailAutoReply:
                     'credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open('token.json', 'w') as token:
+            with open('token_client.json', 'w') as token:
                 token.write(creds.to_json())
         
         self.service = build('gmail', 'v1', credentials=creds)
@@ -188,7 +189,7 @@ class GmailAutoReply:
         try:
             # Get the full conversation history
             conversation_history = self.get_thread_history(message['thread_id'])
-            print(conversation_history)
+            print("Conversation history: ",conversation_history)
             # Detect language from the latest message or the whole thread
             try:
                 detected_lang = detect(conversation_history+message['body'])
@@ -220,8 +221,10 @@ class GmailAutoReply:
             6. Don't use name from the tone
             7. Don't write name or [Your Name] at the end of the message and write like this.
             8. After every period, insert a newline (line break).
-            9. Don't use "thank you", "I appreciate your email", "I appreciate your message", "I appreciate your reaching out", "I appreciate your contacting us" expression or similar expressions of gratitude except for the end of the email.
-               Only use Hi,or Hello or Ciao for greeting.
+            9. Never use "Thank you for reaching out", "thank you", "I appreciate your email", "I appreciate your message", "I appreciate your reaching out", "I appreciate your contacting us" expression or similar expressions of gratitude except for the end of the email.
+               Only use Hi + sender's name,or Hello + sender's name or Ciao + sender's name for greeting at first chat.
+               And then use “Clear + sender's name,”,"Chiara + sender's name", “Okay perfect + sender's name,”,"Ok perfetto + sender's name" for greeting, not use Hi or Hello or Ciao.
+               Don't use both, use only one.
             10. Consider conversation history to generate the response.
             11. Use correct language for the response include greeting and closing.
             Response:
@@ -390,7 +393,7 @@ class GmailAutoReply:
                 
                 # Wait for the specified interval
                 print(f"⏰ Waiting {interval_minutes} minute(s) until next check...")
-                time.sleep(interval_minutes * 60)
+                time.sleep(interval_minutes * 10)
                 
         except KeyboardInterrupt:
             print("\n🛑 Monitoring stopped by user")
