@@ -63,8 +63,8 @@ class GmailAutoReply:
         """Authenticate with Gmail API"""
         creds = None
         # The file token.json stores the user's access and refresh tokens.
-        if os.path.exists('token_client.json'):
-            creds = Credentials.from_authorized_user_file('token_client.json', SCOPES)
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
@@ -75,7 +75,7 @@ class GmailAutoReply:
                     'credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open('token_client.json', 'w') as token:
+            with open('token.json', 'w') as token:
                 token.write(creds.to_json())
         
         self.service = build('gmail', 'v1', credentials=creds)
@@ -192,49 +192,73 @@ class GmailAutoReply:
             print("Conversation history: ",conversation_history)
             # Detect language from the latest message or the whole thread
             try:
-                detected_lang = detect(conversation_history+message['body'])
+                detected_lang = detect(message['body'])
             except Exception:
-                detected_lang = 'en'  # fallback
-            if detected_lang.startswith('it'):
-                lang_instruction = "Rispondi in italiano."
-            else:
+                detected_lang = 'it'  # fallback
+            if detected_lang.startswith('en'):
                 lang_instruction = "Reply in English."
-            
+            else:
+                lang_instruction = "Rispondi in italiano."
+            print(detected_lang)
             with open('message_data.txt', 'r', encoding='utf-8') as f:
                 examples = f.read()
 
             # Create a prompt for the AI
             prompt = f"""
-            You are a professional email assistant. Generate a polite and helpful response to the following email conversation.
+            You are the dedicated Email Specialist for Fast Book Ads (FBA‑Agent) and you reply from either fastbookads@gmail.com or info@fastbookads.com using correct language , english or italian.
             Use this tone: {tone}
-            Language: {lang_instruction}
-
+            Must use this language for the response: {lang_instruction}, don't mix english and italian.
             Conversation history:
             {conversation_history}
+            Context_Messages:
+            {examples}
 
-            Please write a professional response that:
-            1. Acknowledges the sender's message
-            2. Provides helpful information if possible
-            3. Is concise and polite
-            4. Uses appropriate business email tone
-            5. Use the same language as the original message
-            6. Don't use name from the tone
-            7. Don't write name or [Your Name] at the end of the message and write like this.
-            8. After every period, insert a newline (line break).
-            9. Never use "Thank you for reaching out", "thank you", "I appreciate your email", "I appreciate your message", "I appreciate your reaching out", "I appreciate your contacting us" expression or similar expressions of gratitude except for the end of the email.
-               Only use Hi + sender's name,or Hello + sender's name or Ciao + sender's name for greeting at first chat.
-               And then use “Clear + sender's name,”,"Chiara + sender's name", “Okay perfect + sender's name,”,"Ok perfetto + sender's name" for greeting, not use Hi or Hello or Ciao.
-               Don't use both, use only one.
-            10. Consider conversation history to generate the response.
-            11. Use correct language for the response include greeting and closing.
-            Response:
+            1. DATA SOURCE & TRUTHFULNESS
+                • The only authoritative source of facts is the CONTEXT_MESSAGES.  
+                • Never fabricate information. If a detail is missing, ask a concise clarification question or explain the steps to acquire it.
+            2. CONVERSATION AWARENESS
+                • Always analyse the entire conversation (all CONTEXT_MESSAGES), not just the last email.  
+                • Track open action items and reference earlier promises or attachments.  
+                • Use the language that dominates the thread; default to Italian if the balance is equal.
+            3. BRAND VOICE & TONE
+                Mirror the style of previous Fast Book Ads outbound emails you detect in CONTEXT_MESSAGES:
+                • Level of formality: moderately formal yet approachable  
+                • Greetings: Only use Ciao + {{Name}} , Hi + {{Name}},or Hello + {{Name}} for greeting at only first response.
+                  And then use “Clear + {{Name}}”,"Chiaro + {{Name}}", “Okay perfect + {{Name}},”,"Ok perfetto + {{Name}}" for greeting, not use Hi or Hello or Ciao.,  
+                • Closings: "Grazie!" for Italian / "Best regards, for english
+                • Sentences: 15‑25 words, active voice.  
+                • Use succinct paragraphs; bullet‑points for lists and some emojis, not use bold format.
+                • Keep language consistent—never mix Italian and English in the same paragraph.  
+                • Friendly, solution‑oriented, and technically precise.
+            4. STRUCTURE OF EVERY REPLY
+                • Greeting  
+                • One‑sentence recap of the request  
+                • Numbered answers or steps (include code snippets or links as needed)  
+                • Next action / offer of further help  
+            5. FORMATTING RULES
+                • Plaintext/Markdown only (no HTML).  
+                • Line length ≤ 80 characters.  
+                • Numbered lists for procedures; dashes for simple lists.  
+                • Embed inline code with back‑ticks.
+            6. IMPORTANT RULES
+                • Don't use name from the tone
+                • Don't write name or [Your Name] at the end of the message and write like this.
+                • Never use "Thank you for reaching out", "thank you", "I appreciate your email", "I appreciate your message", "I appreciate your reaching out", "I appreciate your contacting us" expression or similar expressions of gratitude except for the end of the email.
+                  Only use Hi + sender's name,or Hello + sender's name or Ciao + sender's name for greeting at first chat.
+                  And then use “Clear + sender's name,”,"Chiara + sender's name", “Okay perfect + sender's name,”,"Ok perfetto + sender's name" for greeting, not use Hi or Hello or Ciao.
+                  Don't use both, use only one.
+                • Consider conversation history to generate the response.
+                • Don't write signature at the end of email.
+                • Use correct language for the response include greeting and closing.
+            OUTPUT
+            Return only the finished email reply as a string, following the guidance above.
             """
 
             # Call OpenAI API   
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "You are a professional email assistant that writes polite, helpful, and concise email responses in the same language as the original message."},
+                    {"role": "system", "content": "You are the dedicated Email Specialist for Fast Book Ads (FBA‑Agent) and you reply from either fastbookads@gmail.com or info@fastbookads.com."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=500,
@@ -288,7 +312,7 @@ class GmailAutoReply:
                     Customer Success Assistant<br>
                     fastbookads.com
                 </div>
-                <img src='cid:signature' style='max-width:120px; width:100%; height:auto; margin-top:5px; display:block;'>
+                <img src='cid:signature' style='width:120px; max-width:100%; height:auto; margin-top:5px; display:block;'>
             </div>
             """
             alternative_part.attach(MIMEText(html_body, 'html'))
