@@ -63,8 +63,8 @@ class GmailAutoReply:
         """Authenticate with Gmail API"""
         creds = None
         # The file token.json stores the user's access and refresh tokens.
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        if os.path.exists('token_client.json'):
+            creds = Credentials.from_authorized_user_file('token_client.json', SCOPES)
         
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
@@ -75,7 +75,7 @@ class GmailAutoReply:
                     'credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open('token.json', 'w') as token:
+            with open('token_client.json', 'w') as token:
                 token.write(creds.to_json())
         
         self.service = build('gmail', 'v1', credentials=creds)
@@ -244,8 +244,8 @@ class GmailAutoReply:
                 • Don't use name from the tone
                 • Don't write name or [Your Name] at the end of the message and write like this.
                 • Never use "Thank you for reaching out", "thank you", "I appreciate your email", "I appreciate your message", "I appreciate your reaching out", "I appreciate your contacting us" expression or similar expressions of gratitude except for the end of the email.
-                  Only use Hi + sender's name,or Hello + sender's name or Ciao + sender's name for greeting at first chat.
-                  And then use “Clear + sender's name,”,"Chiara + sender's name", “Okay perfect + sender's name,”,"Ok perfetto + sender's name" for greeting, not use Hi or Hello or Ciao.
+                  You should use Hi + sender's name,or Hello + sender's name or Ciao + sender's name for greeting at first chat.
+                  And then use “Clear + sender's name,”,"Chiara + sender's name", “Okay perfect + sender's name,”,"Ok perfetto + sender's name" for greeting.
                   Don't use both, use only one.
                 • Consider conversation history to generate the response.
                 • Don't write signature at the end of email.
