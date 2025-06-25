@@ -79,6 +79,26 @@ class GmailAutoReply:
                 token.write(creds.to_json())
         
         self.service = build('gmail', 'v1', credentials=creds)
+        print(self.service.users().getProfile(userId='me').execute()['emailAddress'])
+        # results = self.service.users().drafts().list(
+        #     userId='me',
+        #     maxResults=10
+        # ).execute()
+        
+        # drafts = results.get('drafts', [])
+        # draft_messages = []
+        
+        # for draft in drafts:
+        #     # Get full draft message
+        #     draft_message = self.service.users().drafts().get(
+        #         userId='me',
+        #         id=draft['id']
+        #     ).execute()
+            
+        #     # Get the actual message content
+        #     message = draft_message['message']
+        #     body = self.extract_message_body(message['payload'])
+        #     print(body)
         print("✅ Successfully authenticated with Gmail API")
         
     def get_new_messages(self) -> List[Dict]:
@@ -189,7 +209,7 @@ class GmailAutoReply:
         try:
             # Get the full conversation history
             conversation_history = self.get_thread_history(message['thread_id'])
-            print("Conversation history: ",conversation_history)
+            # print("Conversation history: ",conversation_history)
             # Detect language from the latest message or the whole thread
             try:
                 detected_lang = detect(message['body'])
@@ -205,53 +225,71 @@ class GmailAutoReply:
 
             # Create a prompt for the AI
             prompt = f"""
-            You are the dedicated Email Specialist for Fast Book Ads (FBA‑Agent) and you reply from either fastbookads@gmail.com or info@fastbookads.com using correct language , english or italian.
-            Use this tone: {tone}
-            Must use this language for the response: {lang_instruction}, don't mix english and italian.
-            Conversation history:
+You are the Email Specialist for Fast Book Ads (FBA‑Agent) replying from fastbookads@gmail.com or info@fastbookads.com.
+
+            CRITICAL RULES - FOLLOW EXACTLY:
+
+            1. LANGUAGE CONSISTENCY
+            • Response language: {lang_instruction}
+            • NEVER mix languages in the same email
+            • If language is Italian: ALL text must be Italian (greeting, body, closing)
+            • If language is English: ALL text must be English (greeting, body, closing)
+
+            2. NAME HANDLING
+            • Extract sender's name from the conversation history only
+            • If no clear name found, use generic greeting without name
+            • NEVER use placeholder names like [Name] or {{Name}}
+            • NEVER use names from the tone variable
+
+            3. GREETING RULES
+            For FIRST response only:
+            • English: "Hi [actual name]" or "Hello [actual name]"
+            • Italian: "Ciao [actual name]"
+            
+            For FOLLOW-UP responses:
+            • English: "Clear [actual name]" or "Okay perfect [actual name]"
+            • Italian: "Chiaro [actual name]" or "Ok perfetto [actual name]"
+
+            4. CLOSING RULES
+            • English: "Best regards,"
+            • Italian: "Grazie!"
+
+            5. TONE: {tone}
+
+            6. CONTENT SOURCES
+            • Use ONLY information from conversation history and context messages
+            • Never fabricate details
+            • Ask clarifying questions if information is missing
+
+            CONVERSATION HISTORY:
             {conversation_history}
-            Context_Messages:
+
+            CONTEXT MESSAGES:
             {examples}
 
-            1. DATA SOURCE & TRUTHFULNESS
-                • The only authoritative source of facts is the CONTEXT_MESSAGES.  
-                • Never fabricate information. If a detail is missing, ask a concise clarification question or explain the steps to acquire it.
-            2. CONVERSATION AWARENESS
-                • Always analyse the entire conversation (all CONTEXT_MESSAGES), not just the last email.  
-                • Track open action items and reference earlier promises or attachments.  
-                • Use the language that dominates the thread; default to Italian if the balance is equal.
-            3. BRAND VOICE & TONE
-                Mirror the style of previous Fast Book Ads outbound emails you detect in CONTEXT_MESSAGES:
-                • Level of formality: moderately formal yet approachable  
-                • Greetings: Only use Ciao + {{Name}} , Hi + {{Name}},or Hello + {{Name}} for greeting at only first response.
-                  And then use “Clear + {{Name}}”,"Chiaro + {{Name}}", “Okay perfect + {{Name}},”,"Ok perfetto + {{Name}}" for greeting, not use Hi or Hello or Ciao.,  
-                • Closings: "Grazie!" for Italian / "Best regards, for english
-                • Sentences: 15‑25 words, active voice.  
-                • Use succinct paragraphs; bullet‑points for lists and some emojis, not use bold format.
-                • Keep language consistent—never mix Italian and English in the same paragraph.  
-                • Friendly, solution‑oriented, and technically precise.
-            4. STRUCTURE OF EVERY REPLY
-                • Greeting  
-                • One‑sentence recap of the request  
-                • Numbered answers or steps (include code snippets or links as needed)  
-                • Next action / offer of further help  
-            5. FORMATTING RULES
-                • Plaintext/Markdown only (no HTML).  
-                • Line length ≤ 80 characters.  
-                • Numbered lists for procedures; dashes for simple lists.  
-                • Embed inline code with back‑ticks.
-            6. IMPORTANT RULES
-                • Don't use name from the tone
-                • Don't write name or [Your Name] at the end of the message and write like this.
-                • Never use "Thank you for reaching out", "thank you", "I appreciate your email", "I appreciate your message", "I appreciate your reaching out", "I appreciate your contacting us" expression or similar expressions of gratitude except for the end of the email.
-                  You should use Hi + sender's name,or Hello + sender's name or Ciao + sender's name for greeting at first chat.
-                  And then use “Clear + sender's name,”,"Chiara + sender's name", “Okay perfect + sender's name,”,"Ok perfetto + sender's name" for greeting.
-                  Don't use both, use only one.
-                • Consider conversation history to generate the response.
-                • Don't write signature at the end of email.
-                • Use correct language for the response include greeting and closing.
-            OUTPUT
-            Return only the finished email reply as a string, following the guidance above.
+            RESPONSE STRUCTURE:
+            1. Simple, friendly greeting with name
+            2. Personal introduction (first response only) with genuine appreciation
+            3. Acknowledge their situation with empathy ("It's definitely strange that...")
+            4. Ask helpful clarifying questions or provide solutions
+            5. Offer continued support in a casual way ("Keep me posted, and if needed, we'll find an alternative way...")
+            
+            WARMTH & CONVERSATIONAL STYLE:
+            • Use emoticons sparingly but naturally (:) 
+            • Sound like you genuinely care about solving their problem
+            • Use phrases like "It's definitely strange that..." or "I understand that can be frustrating"
+            • Be reassuring and solution-focused
+            • Keep it conversational, not corporate
+            • Show you're personally invested in helping them
+
+            FORMATTING:
+            • Plain text only
+            • Natural paragraph breaks
+            • Keep sentences conversational length
+            • No bullet points unless listing specific steps
+            • No signature block
+
+            OUTPUT: Return only the complete email response as plain text that sounds personal, warm, and genuinely helpful.
             """
 
             # Call OpenAI API   
@@ -312,24 +350,26 @@ class GmailAutoReply:
                     Customer Success Assistant<br>
                     fastbookads.com
                 </div>
-                <img src='cid:signature' style='width:120px; max-width:100%; height:auto; margin-top:5px; display:block;'>
+                <img src='cid:signature' style='width:80px; height:auto; margin-top:5px; display:block;'>
             </div>
             """
+
+
             alternative_part.attach(MIMEText(html_body, 'html'))
             
             # Attach the alternative part to the main message
             message.attach(alternative_part)
             
             # Attach the signature image
-            signature_path = os.path.join(os.path.dirname(__file__), 'signature.jpg')
+            signature_path = os.path.join(os.path.dirname(__file__), 'signature.png')
             if os.path.exists(signature_path):
                 with open(signature_path, 'rb') as img_file:
                     signature_img = MIMEImage(img_file.read())
                     signature_img.add_header('Content-ID', '<signature>')
-                    signature_img.add_header('Content-Disposition', 'inline', filename='signature.jpg')
+                    signature_img.add_header('Content-Disposition', 'inline', filename='signature.png')
                     message.attach(signature_img)
             else:
-                print("⚠️ Warning: signature.jpg not found in the directory")
+                print("⚠️ Warning: signature.png not found in the directory")
             
             # Convert to raw message
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
@@ -378,16 +418,17 @@ class GmailAutoReply:
             tone = extract_tone_from_examples("message_data.txt", self.openai_client)
             print("🤖 Generating AI response...")
             ai_response = self.generate_ai_response(msg, tone)
-            
+            print(ai_response)
             # Create draft reply
             print("📝 Creating draft reply...")
             draft = self.create_draft_reply(msg, ai_response)
             
             if draft:
                 print(f"✅ Draft saved successfully!")
-                print(f"AI Response Preview: {ai_response[:100]}...")
+                print(f"AI Response Preview: {ai_response}")
             
             print("-" * 50)
+    
     
     def start_monitoring(self, interval_minutes: int = 1):
         """Start monitoring Gmail inbox for new messages"""
@@ -415,6 +456,7 @@ class GmailAutoReply:
                 # Update last check time
                 self.last_check_time = current_time
                 
+
                 # Wait for the specified interval
                 print(f"⏰ Waiting {interval_minutes} minute(s) until next check...")
                 time.sleep(interval_minutes * 10)
