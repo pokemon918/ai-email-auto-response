@@ -18,12 +18,19 @@ from openai import OpenAI
 import re
 from langdetect import detect
 import httpx
+from pinecone import Pinecone
+from pinecone import ServerlessSpec
+
+from bs4 import BeautifulSoup
 
 load_dotenv()
 
 # Gmail API scopes - Updated to include drafts
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 
-          'https://www.googleapis.com/auth/gmail.compose']
+          'https://www.googleapis.com/auth/gmail.compose']\
+
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+
 
 class GmailAutoReply:
     def __init__(self):
@@ -59,6 +66,25 @@ class GmailAutoReply:
             "update@global.metamail.com"
         }
         self.blocked_patterns = ["noreply", "no-reply"]
+
+        PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+
+        index_name = "email-auto-response"
+        self.pc = Pinecone(api_key=PINECONE_API_KEY)
+
+        if not self.pc.has_index(index_name):
+            self.pc.create_index(
+                name=index_name,
+                vector_type="dense",
+                dimension=1024,
+                metric="dotproduct",
+                spec=ServerlessSpec(
+                    cloud="aws",
+                    region="us-east-1"
+                )
+            )
+        self.index =  self.pc.Index(index_name)
+        print(f"Connected to index '{index_name}'.")
     def authenticate(self):
         """Authenticate with Gmail API"""
         creds = None
@@ -211,6 +237,8 @@ class GmailAutoReply:
             conversation_history = self.get_thread_history(message['thread_id'])
             # print("Conversation history: ",conversation_history)
             # Detect language from the latest message or the whole thread
+            reply_message=vector_search(message['body'])[0]['metadata']['reply_message']
+            print(reply_message)
             try:
                 detected_lang = detect(message['body'])
             except Exception:
@@ -220,77 +248,64 @@ class GmailAutoReply:
             else:
                 lang_instruction = "Rispondi in italiano."
             print(detected_lang)
-            with open('message_data.txt', 'r', encoding='utf-8') as f:
-                examples = f.read()
+            # with open('message_data.txt', 'r', encoding='utf-8') as f:
+            #     examples = f.read()
 
             # Create a prompt for the AI
             prompt = f"""
-You are the Email Specialist for Fast Book Ads (FBA‑Agent) replying from fastbookads@gmail.com or info@fastbookads.com.
+You are an email response automation assistant. Your task is to generate email responses that closely match the tone, style, and approach of a provided reference reply.
 
-            CRITICAL RULES - FOLLOW EXACTLY:
+Instructions:
+1. **Analyze the reference reply_message for:**
+   - Tone (formal, casual, friendly, professional, etc.)
+   - Writing style (concise, detailed, conversational, etc.)
+   - Language patterns and vocabulary choices
+   - Level of formality
+   - Emotional undertone (enthusiastic, neutral, empathetic, etc.)
 
-            1. LANGUAGE CONSISTENCY
-            • Response language: {lang_instruction}
-            • NEVER mix languages in the same email
-            • If language is Italian: ALL text must be Italian (greeting, body, closing)
-            • If language is English: ALL text must be English (greeting, body, closing)
+2. **Generate a response that:**
+   - Mirrors the same tone and style as the reply_message
+   - Uses similar sentence structure and language patterns
+   - But use the same language of original message
+   - Maintains consistent formality level
+   - Feels natural and authentic in the established voice
 
-            2. NAME HANDLING
-            • Extract sender's name from the conversation history only
-            • If no clear name found, use generic greeting without name
-            • NEVER use placeholder names like [Name] or {{Name}}
-            • NEVER use names from the tone variable
+3. **Ensure the response:**
+   - Is contextually relevant to the original email
+   - Maintains the same level of detail as the reference
+   - Uses similar greeting and closing styles
+   - Follows the same communication approach
 
-            3. GREETING RULES
-            For FIRST response only:
-            • English: "Hi [actual name]" or "Hello [actual name]"
-            • Italian: "Ciao [actual name]"
-            
-            For FOLLOW-UP responses:
-            • English: "Clear [actual name]" or "Okay perfect [actual name]"
-            • Italian: "Chiaro [actual name]" or "Ok perfetto [actual name]"
+CRITICAL RULES - FOLLOW EXACTLY:
 
-            4. CLOSING RULES
-            • English: "Best regards,"
-            • Italian: "Grazie!"
+1. LANGUAGE CONSISTENCY
+• Response language: {lang_instruction}
+• NEVER mix languages in the same email
+• If language is Italian: ALL text must be Italian (greeting, body, closing)
+• If language is English: ALL text must be English (greeting, body, closing)
 
-            5. TONE: {tone}
+2. NAME HANDLING
+• Extract sender's name from the conversation history only
+• If no clear name found, use generic greeting without name
+• NEVER use placeholder names like [Name] or {{Name}}
+• NEVER use names from the reference reply_message
 
-            6. CONTENT SOURCES
-            • Use ONLY information from conversation history and context messages
-            • Never fabricate details
-            • Ask clarifying questions if information is missing
+FORMATTING:
+• Plain text only
+• Natural paragraph breaks
+• Keep sentences conversational length
+• No bullet points unless listing specific steps
+• Never use names or sign at the end of message
+• No signature block
 
-            CONVERSATION HISTORY:
-            {conversation_history}
 
-            CONTEXT MESSAGES:
-            {examples}
+Reference reply_message: {reply_message}
+Original email to respond to: {message['body']}
+Conversation history: {conversation_history}
 
-            RESPONSE STRUCTURE:
-            1. Simple, friendly greeting with name
-            2. Personal introduction (first response only) with genuine appreciation
-            3. Acknowledge their situation with empathy ("It's definitely strange that...")
-            4. Ask helpful clarifying questions or provide solutions
-            5. Offer continued support in a casual way ("Keep me posted, and if needed, we'll find an alternative way...")
-            
-            WARMTH & CONVERSATIONAL STYLE:
-            • Use emoticons sparingly but naturally (:) 
-            • Sound like you genuinely care about solving their problem
-            • Use phrases like "It's definitely strange that..." or "I understand that can be frustrating"
-            • Be reassuring and solution-focused
-            • Keep it conversational, not corporate
-            • Show you're personally invested in helping them
 
-            FORMATTING:
-            • Plain text only
-            • Natural paragraph breaks
-            • Keep sentences conversational length
-            • No bullet points unless listing specific steps
-            • No signature block
-
-            OUTPUT: Return only the complete email response as plain text that sounds personal, warm, and genuinely helpful.
-            """
+Generate a response that someone reading both messages would recognize as coming from the same person with the same communication style.
+    """
 
             # Call OpenAI API   
             response = self.openai_client.chat.completions.create(
@@ -308,6 +323,23 @@ You are the Email Specialist for Fast Book Ads (FBA‑Agent) replying from fastb
         except Exception as error:
             print(f"❌ Error generating AI response: {error}")
             return "Thank you for your email. I have received your message and will get back to you soon."
+    def vector_search(message):
+        embedding=self.pc.inference.embed(
+            model="llama-text-embed-v2",
+            inputs=[message],
+            parameters={"input_type": "passage", "truncate": "END"}
+        )
+        vector=embedding[0]['values']
+
+        response = self.index.query(
+            top_k=1,
+            vector=vector,
+            include_values=False,
+            include_metadata=True
+        )
+
+        return response.matches
+
     
     def extract_email_address(self, sender: str) -> str:
         """Extract email address from sender string"""
@@ -421,7 +453,7 @@ You are the Email Specialist for Fast Book Ads (FBA‑Agent) replying from fastb
             print(ai_response)
             # Create draft reply
             print("📝 Creating draft reply...")
-            draft = self.create_draft_reply(msg, ai_response)
+            # draft = self.create_draft_reply(msg, ai_response)
             
             if draft:
                 print(f"✅ Draft saved successfully!")

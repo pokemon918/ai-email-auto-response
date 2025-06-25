@@ -15,6 +15,12 @@ from dotenv import load_dotenv # Import the dotenv library
 
 from pinecone import Pinecone
 from pinecone import ServerlessSpec
+
+from openai import OpenAI
+import re
+from langdetect import detect
+import httpx
+
 load_dotenv()
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 
@@ -238,7 +244,8 @@ def vector_search(message,pc,index):
         include_values=False,
         include_metadata=True
     )
-    print(response.matches)
+
+    return response.matches
 
 
 
@@ -265,19 +272,106 @@ if __name__ == "__main__":
     index = pc.Index(index_name)
     print(f"Connected to index '{index_name}'.")
 
-    vector_search("""Hello,
-Good day,
 
-I was trying to download the "K-Ads™ Strategy" but wasn't able to receive it via email.
-If you can help me with this, please let me know
+    message="""Hello, Noemi, I have to meet you, please give me your avaliable time"""
 
-Thank you!
-Best Regards
+    reply_message=vector_search(message,pc,index)[0]['metadata']['reply_message']
+    print(reply_message)
 
-Anthon""",pc,index)
+    try:
+        detected_lang = detect(message)
+    except Exception:
+        detected_lang = 'it'  # fallback
+    if detected_lang.startswith('en'):
+        lang_instruction = "Reply in English."
+    else:
+        lang_instruction = "Rispondi in italiano."
+    print(detected_lang)
+
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not found in environment variables")
+    
+    # Create OpenAI client with explicit configuration
+    openai_client = OpenAI(
+        api_key=api_key,
+        http_client=httpx.Client(
+            timeout=httpx.Timeout(30.0),
+            verify=True
+        )
+    )
+    conversation_history=""
+
+    # Create a prompt for the AI
+    prompt = f"""
+You are an email response automation assistant. Your task is to generate email responses that closely match the tone, style, and approach of a provided reference reply.
+
+Instructions:
+1. **Analyze the reference reply_message for:**
+   - Tone (formal, casual, friendly, professional, etc.)
+   - Writing style (concise, detailed, conversational, etc.)
+   - Language patterns and vocabulary choices
+   - Level of formality
+   - Emotional undertone (enthusiastic, neutral, empathetic, etc.)
+
+2. **Generate a response that:**
+   - Mirrors the same tone and style as the reply_message
+   - Uses similar sentence structure and language patterns
+   - But use the same language of original message
+   - Maintains consistent formality level
+   - Feels natural and authentic in the established voice
+
+3. **Ensure the response:**
+   - Is contextually relevant to the original email
+   - Maintains the same level of detail as the reference
+   - Uses similar greeting and closing styles
+   - Follows the same communication approach
+
+CRITICAL RULES - FOLLOW EXACTLY:
+
+1. LANGUAGE CONSISTENCY
+• Response language: {lang_instruction}
+• NEVER mix languages in the same email
+• If language is Italian: ALL text must be Italian (greeting, body, closing)
+• If language is English: ALL text must be English (greeting, body, closing)
+
+2. NAME HANDLING
+• Extract sender's name from the conversation history only
+• If no clear name found, use generic greeting without name
+• NEVER use placeholder names like [Name] or {{Name}}
+• NEVER use names from the reference reply_message
+
+FORMATTING:
+• Plain text only
+• Natural paragraph breaks
+• Keep sentences conversational length
+• No bullet points unless listing specific steps
+• Never use names or sign at the end of message
+• No signature block
 
 
+Reference reply_message: {reply_message}
+Original email to respond to: {message}
+Conversation history: {conversation_history}
 
-    # gmail_service = get_gmail_service()
-    # if gmail_service:
-    #     find_first_conversation_with_reply(gmail_service,pc,index)
+
+Generate a response that someone reading both messages would recognize as coming from the same person with the same communication style.
+    """
+
+    # Call OpenAI API   
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are the dedicated Email Specialist for Fast Book Ads (FBA‑Agent) and you reply from either fastbookads@gmail.com or info@fastbookads.com."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=500,
+        temperature=0.7
+    )
+
+    ai_response = response.choices[0].message.content.strip()
+    print(ai_response)
+
+# gmail_service = get_gmail_service()
+# if gmail_service:
+#     find_first_conversation_with_reply(gmail_service,pc,index)
