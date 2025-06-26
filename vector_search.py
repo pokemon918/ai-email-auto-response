@@ -273,7 +273,11 @@ if __name__ == "__main__":
     print(f"Connected to index '{index_name}'.")
 
 
-    message="""Hello, Noemi, I have to meet you, please give me your avaliable time"""
+    message="""Ciao!
+Ho letto tutto. Perfetto! 
+Oggi sono partite anche le ADS finalmente. 
+Procederei per il rinnovo. 😊👍🏼
+Come avevamo fatto la volta scorsa? """
 
     reply_message=vector_search(message,pc,index)[0]['metadata']['reply_message']
     print(reply_message)
