@@ -273,11 +273,7 @@ if __name__ == "__main__":
     print(f"Connected to index '{index_name}'.")
 
 
-    message="""Ciao!
-Ho letto tutto. Perfetto! 
-Oggi sono partite anche le ADS finalmente. 
-Procederei per il rinnovo. 😊👍🏼
-Come avevamo fatto la volta scorsa? """
+    message="""Hello,my name is Anthon, I want to get your service"""
 
     reply_message=vector_search(message,pc,index)[0]['metadata']['reply_message']
     print(reply_message)
@@ -320,7 +316,7 @@ Instructions:
 
 2. **Generate a response that:**
    - Mirrors the same tone and style as the reply_message
-   - Uses similar sentence structure and language patterns
+   - Uses same sentence structure and language patterns
    - But use the same language of original message
    - Maintains consistent formality level
    - Feels natural and authentic in the established voice

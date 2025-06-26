@@ -89,8 +89,8 @@ class GmailAutoReply:
         """Authenticate with Gmail API"""
         creds = None
         # The file token.json stores the user's access and refresh tokens.
-        if os.path.exists('token_client.json'):
-            creds = Credentials.from_authorized_user_file('token_client.json', SCOPES)
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
@@ -101,7 +101,7 @@ class GmailAutoReply:
                     'credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open('token_client.json', 'w') as token:
+            with open('token.json', 'w') as token:
                 token.write(creds.to_json())
         
         self.service = build('gmail', 'v1', credentials=creds)
@@ -229,6 +229,22 @@ class GmailAutoReply:
             cleaned_lines.append(line)
         
         return '\n'.join(cleaned_lines).strip()
+    def vector_search(self,message):
+        embedding=self.pc.inference.embed(
+            model="llama-text-embed-v2",
+            inputs=[message],
+            parameters={"input_type": "passage", "truncate": "END"}
+        )
+        vector=embedding[0]['values']
+
+        response = self.index.query(
+            top_k=1,
+            vector=vector,
+            include_values=False,
+            include_metadata=True
+        )
+
+        return response.matches
     
     def generate_ai_response(self, message: Dict, tone: str) -> str:
         """Generate AI response using OpenAI, in the same language as the incoming email"""
@@ -237,7 +253,7 @@ class GmailAutoReply:
             conversation_history = self.get_thread_history(message['thread_id'])
             # print("Conversation history: ",conversation_history)
             # Detect language from the latest message or the whole thread
-            reply_message=vector_search(message['body'])[0]['metadata']['reply_message']
+            reply_message=self.vector_search(message['body'])[0]['metadata']['reply_message']
             print(reply_message)
             try:
                 detected_lang = detect(message['body'])
@@ -253,7 +269,7 @@ class GmailAutoReply:
 
             # Create a prompt for the AI
             prompt = f"""
-You are an email response automation assistant. Your task is to generate email responses that closely match the tone, style, and approach of a provided reference reply.
+You are an email response automation assistant and your real name is Noemi. Your task is to generate email responses that closely match the tone, style, and approach of a provided reference reply.
 
 Instructions:
 1. **Analyze the reference reply_message for:**
@@ -265,10 +281,11 @@ Instructions:
 
 2. **Generate a response that:**
    - Mirrors the same tone and style as the reply_message
-   - Uses similar sentence structure and language patterns
+   - Uses same sentence structure and language patterns, vocabulary
    - But use the same language of original message
    - Maintains consistent formality level
    - Feels natural and authentic in the established voice
+   - Never use name or signature at the end of message
 
 3. **Ensure the response:**
    - Is contextually relevant to the original email
@@ -295,7 +312,7 @@ FORMATTING:
 • Natural paragraph breaks
 • Keep sentences conversational length
 • No bullet points unless listing specific steps
-• Never use names or sign at the end of message
+• Never use names or sign at the end of message, only use greeting
 • No signature block
 
 
@@ -323,22 +340,7 @@ Generate a response that someone reading both messages would recognize as coming
         except Exception as error:
             print(f"❌ Error generating AI response: {error}")
             return "Thank you for your email. I have received your message and will get back to you soon."
-    def vector_search(message):
-        embedding=self.pc.inference.embed(
-            model="llama-text-embed-v2",
-            inputs=[message],
-            parameters={"input_type": "passage", "truncate": "END"}
-        )
-        vector=embedding[0]['values']
 
-        response = self.index.query(
-            top_k=1,
-            vector=vector,
-            include_values=False,
-            include_metadata=True
-        )
-
-        return response.matches
 
     
     def extract_email_address(self, sender: str) -> str:
@@ -385,7 +387,6 @@ Generate a response that someone reading both messages would recognize as coming
                 <img src='cid:signature' style='width:80px; height:auto; margin-top:5px; display:block;'>
             </div>
             """
-
 
             alternative_part.attach(MIMEText(html_body, 'html'))
             
@@ -453,7 +454,7 @@ Generate a response that someone reading both messages would recognize as coming
             print(ai_response)
             # Create draft reply
             print("📝 Creating draft reply...")
-            # draft = self.create_draft_reply(msg, ai_response)
+            draft = self.create_draft_reply(msg, ai_response)
             
             if draft:
                 print(f"✅ Draft saved successfully!")
