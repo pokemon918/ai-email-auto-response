@@ -85,17 +85,43 @@ class GmailAutoReply:
             )
         self.index =  self.pc.Index(index_name)
         print(f"Connected to index '{index_name}'.")
+    def refresh_access_token(self, creds):
+        """Refresh the access token using refresh token"""
+        try:
+            print("Refreshing access token...")
+            creds.refresh(Request())
+            
+            # Save updated token
+            token_data = {
+                'token': creds.token,
+                'refresh_token': creds.refresh_token,
+                'token_uri': creds.token_uri,
+                'client_id': creds.client_id,
+                'client_secret': creds.client_secret,
+                'scopes': creds.scopes,
+                'expiry': creds.expiry.isoformat() if creds.expiry else None
+            }
+            
+            with open("token_client.json", 'a') as f:
+                json.dump(token_data, f, indent=2)
+            
+            print("Access token refreshed successfully")
+            return creds
+        except Exception as e:
+            print(f"Error refreshing token: {e}")
+            return None
+
     def authenticate(self):
         """Authenticate with Gmail API"""
         creds = None
         # The file token.json stores the user's access and refresh tokens.
         if os.path.exists('token_client.json'):
             creds = Credentials.from_authorized_user_file('token_client.json', SCOPES)
-        
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
+                print("Token refreshed successfully")
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     'credentials.json', SCOPES)
@@ -454,7 +480,7 @@ Generate a response that someone reading both messages would recognize as coming
             print(ai_response)
             # Create draft reply
             print("📝 Creating draft reply...")
-            draft = self.create_draft_reply(msg, ai_response)
+            # draft = self.create_draft_reply(msg, ai_response)
             
             if draft:
                 print(f"✅ Draft saved successfully!")
@@ -566,7 +592,7 @@ def main():
         auto_reply.authenticate()
         
         # Start monitoring (check every 2 minutes to avoid rate limits)
-        auto_reply.start_monitoring(interval_minutes=1)
+        auto_reply.start_monitoring(interval_minutes=5)
         
     except Exception as error:
         print(f"❌ Error: {error}")
