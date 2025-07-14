@@ -480,7 +480,7 @@ Generate a response that someone reading both messages would recognize as coming
             print(ai_response)
             # Create draft reply
             print("📝 Creating draft reply...")
-            # draft = self.create_draft_reply(msg, ai_response)
+            draft = self.create_draft_reply(msg, ai_response)
             
             if draft:
                 print(f"✅ Draft saved successfully!")
